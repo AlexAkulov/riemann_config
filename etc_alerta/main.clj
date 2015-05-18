@@ -57,18 +57,6 @@
 (defn now []
 		(Math/floor (unix-time)))
 
-(defn switch-epoch-to-elapsed
-  [& children]
-  (fn [e] ((apply with {:metric (- (now) (:metric e))} children) e)))
-
-
-(defn event-to-grid-event
-  [& children]
-  (fn [e] ((apply with {:service "grid heartbeat"
-                        :host (str (:environment e) ":" (:grid e))
-                        :resource (:grid e)
-                        :cluster "n/a"} children) e)))
-
 (defn lookup-metric
   [metricname & children]
   (let [metricsymbol (keyword metricname)]
@@ -89,29 +77,40 @@
 (def major (partial severity "major"))
 (def critical (partial severity "critical"))
 
+;(defn edge-detection
+;  [samples & children]
+;  (let [detector (by [:host :service] (runs samples :state (apply changed :state {:init "normal"} children)))]
+;    (fn [e] (detector e))))
+
 (defn edge-detection
-  [samples & children]
-  (let [detector (by [:host :service] (runs samples :state (apply changed :state {:init "normal"} children)))]
-    (fn [e] (detector e))))
+  [& children]
+  (let [detector (by [:host :service] (apply changed :state {:init "normal"} children))]
+    (fn [e] (detector e ))))
 
-(defn set-resource-from-cluster [e] (assoc e :resource (:cluster e)))
 
-(defn proportion
-  [events]
-  (when-let [event (first events)]
-    (try
-      (riemann.folds/fold-all (fn [a b] (/ a (+ a b))) events)
-      (catch NullPointerException ex
-        (merge event :metric nil)))))
+;(defn dedup-alert
+;	(fn [e] ((edge-detection 1 log-info) e)))
+
+;(def alert (info "ALERT"))
+;(def myindex [& children] (fn [e] (do (index e) )))
+;(def dedup-alert 
+;  (fn [events] 
+;	(do 
+;	  (edge-detection 1 events alert)
+;	  index events)))
 
 ; thresholding
 (let [index (default :ttl 900 (index))
 ;      alert (async-queue! :alerta {:queue-size 10000}
 ;                          (alerta {}))
       alert #(info "ALERT" %)
-      dedup-alert (edge-detection 1 index alert)
-      dedup-2-alert (edge-detection 2 log-info alert)
-      dedup-4-alert (edge-detection 4 log-info alert)
+      ;dedup-alert #(do ((edge-detection alert) %) (index %))
+      dedup-alert (edge-detection alert)
+      ;dedup-alert (fn[e] ((edge-detection alert) e))
+      ;dedup-alert (fn [e] ((edge-detection 1 alert) e))
+      ;dedup-alert (fn [x] (do (info x) (index x))) 
+      ;dedup-alert (edge-detection alert)
+      ;dedup-4-alert (edge-detection 4 log-info alert)
 ]
 
    (streams (parse-stream
@@ -134,8 +133,8 @@
                    (match :resource "swap_util"
                           (with {:event "SwapUtil" :group "OS"}
                                 (splitp < metric
-                                        90 (minor "Swap utilisation is very high" dedup-alert)
-                                        (normal "Swap utilisation is OK" dedup-alert))))
+                                        90 (minor "Swap utilisation is very high" dedup-alert index)
+                                        (normal "Swap utilisation is OK" dedup-alert index))))
 
                    cpu-load-five
                    (by [:host]
